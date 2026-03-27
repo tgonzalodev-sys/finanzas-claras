@@ -3,55 +3,48 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).end();
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método no permitido' });
-  }
-
-  const { nombre, email } = req.body;
-
+  const { nombre, email } = req.body || {};
   if (!nombre || !email) {
-    return res.status(400).json({ error: 'Nombre y email son requeridos' });
+    return res.status(400).json({ error: 'Faltan datos' });
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ error: 'Email inválido' });
-  }
+  const AIRTABLE_TOKEN = process.env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE  = process.env.AIRTABLE_BASE_ID;
+  const TABLE_NAME     = 'Leads';
+
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE}/${TABLE_NAME}`;
+
+  const payload = {
+    fields: {
+      Nombre: String(nombre).trim(),
+      Email:  String(email).trim().toLowerCase(),
+    }
+  };
 
   try {
-    const response = await fetch(
-      `https://api.airtable.com/v0/${process.env.AIRTABLE_BASE_ID}/leads`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.AIRTABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fields: {
-            Nombre: nombre.trim(),
-            Email: email.trim().toLowerCase(),
-            Fecha: new Date().toISOString(),
-            Fuente: 'Landing Page',
-          },
-        }),
-      }
-    );
+    const r = await fetch(url, {
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${AIRTABLE_TOKEN}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
 
-    if (!response.ok) {
-      const error = await response.json();
-      console.error('Airtable error:', error);
-      return res.status(500).json({ error: 'Error al guardar. Intentá de nuevo.' });
+    const body = await r.json();
+
+    if (!r.ok) {
+      console.error('Airtable error:', JSON.stringify(body));
+      return res.status(500).json({ error: 'Error de Airtable', detail: body });
     }
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, id: body.id });
 
   } catch (err) {
-    console.error('Server error:', err);
-    return res.status(500).json({ error: 'Error del servidor. Intentá de nuevo.' });
+    console.error('Fetch error:', err.message);
+    return res.status(500).json({ error: 'Error de red', detail: err.message });
   }
 }
